@@ -25,7 +25,7 @@ const char* LOCAL_PASS = "158a32222";
    - Biến lưu URL cố định để tải file .bin. 
    - YÊU CẦU: Thay thế <USERNAME> và <REPO_NAME> thành đúng thông tin GitHub của bạn.
 ========================================================================= */
-String FIRMWARE_URL = "https://github.com/trainsr-hub/VGF035/releases/download/latest/sketch_jun25a.ino.bin";
+String FIRMWARE_URL = "https://github.com/trainsr-hub/VGF035/releases/download/latest/VGF035.ino.bin";
 /* ========================================================================= */
 
 WiFiServer tuningServer(8080);

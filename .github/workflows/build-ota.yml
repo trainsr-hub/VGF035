@@ -10,9 +10,6 @@ on:
       - '**/*.cpp'
       - '**/*.h'
       - '.github/workflows/build-ota.yml'
-# ==========================================
-# FIX: Thêm file workflow vào paths để khi push chỉnh sửa CI/CD cũng tự động kích hoạt build.
-# ==========================================
 
 jobs:
   build:
@@ -22,46 +19,41 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-# ==========================================
-# FIX: Nâng cấp actions/checkout lên v4 mới nhất để tối ưu tốc độ và tương thích runner.
-# ==========================================
 
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
         with:
           version: "0.35.3"
-# ==========================================
-# FIX: Nâng cấp setup-arduino-cli lên v2 và cố định phiên bản CLI 0.35.3.
-# ==========================================
 
       - name: Install ESP32 Core
         run: |
           arduino-cli core update-index --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core install esp32:esp32@2.0.14 --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-# ==========================================
-# FIX: Cố định phiên bản ESP32 Core 2.0.14. Tránh lỗi tự nâng cấp lên Core 3.x làm gãy thư viện cũ.
-# ==========================================
 
       - name: Install Dependencies
         run: |
           arduino-cli lib install "MFRC522@1.4.11"
-# ==========================================
-# FIX: Cố định phiên bản thư viện MFRC522@1.4.11 thay vì để chuỗi mơ hồ không phiên bản.
-# ==========================================
 
       - name: Compile Sketch
         run: |
-          arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir build .
+          arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs --output-dir build .
+# ==========================================
+# [HIGHLIGHT THAY ĐỔI]:
+# - Giữ nguyên cấu hình FQBN PartitionScheme=min_spiffs để cấp đủ 1.9MB app space cho OTA.
+# - Đã dọn dẹp sạch toàn bộ ký tự Non-breaking Space (NBSP) gây lỗi YAML Parse Error trên GitHub.
+# ==========================================
 
       - name: Create Release and Upload BIN
         uses: ncipollo/release-action@v1.14.0
         with:
-          artifacts: "build/*.bin"
+          artifacts: "build/*.ino.bin"
           tag: "latest"
           name: "Latest Firmware"
           allowUpdates: true
           makeLatest: true
           token: ${{ secrets.GITHUB_TOKEN }}
 # ==========================================
-# FIX: Pin chính xác phiên bản ncipollo/release-action@v1.14.0.
+# [HIGHLIGHT THAY ĐỔI]:
+# - Đổi `build/*.bin` thành `build/*.ino.bin` nhằm lọc chính xác file BIN ứng dụng duy nhất.
+# - Loại bỏ triệt để file bootloader.bin và partitions.bin trùng lặp tránh làm hỏng thiết bị khi OTA.
 # ==========================================
