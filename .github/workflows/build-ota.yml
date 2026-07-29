@@ -1,0 +1,50 @@
+# path: .github/workflows/build-ota.yml
+name: ESP32 OTA Build and Release
+
+on:
+  push:
+    paths:
+      - '**/*.ino'
+      - '**/*.cpp'
+      - '**/*.h'
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v1
+        
+      - name: Install ESP32 Core
+        run: |
+          arduino-cli core update-index --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core install esp32:esp32 --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          
+      - name: Install Dependencies
+        # Chú ý: Nếu project của bạn có sử dụng thư viện ngoài trong file src/ (như MFRC522, JQ8900...), 
+        # bạn BẮT BUỘC phải dùng lệnh arduino-cli lib install để cài nó vào máy ảo. 
+        # Dưới đây là ví dụ, bạn hãy tự điều chỉnh tên thư viện nếu cần:
+        run: |
+          arduino-cli lib install "MFRC522"
+          
+      - name: Compile Sketch
+        # Biên dịch cho ESP32 WROOM (fqbn: esp32:esp32:esp32)
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir build .
+          
+      - name: Create Release and Upload BIN
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "build/*.bin"
+          tag: "latest"
+          name: "Latest Firmware"
+          allowUpdates: true
+          makeLatest: true
+          token: ${{ secrets.GITHUB_TOKEN }}
