@@ -9,9 +9,9 @@
 
 /* =========================================================================
    [HIGHLIGHT THAY ĐỔI]: 
-   - Xoá thư viện ArduinoOTA cục bộ.
-   - Bổ sung các thư viện mạng và OTA cần thiết cho giao thức HTTPS.
+   - Khai báo đồng thời cả ArduinoOTA (Local) và WiFiClientSecure/HTTPUpdate (GitHub Cloud).
 ========================================================================= */
+#include <ArduinoOTA.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
@@ -22,8 +22,7 @@ const char* LOCAL_PASS = "158a32222";
 
 /* =========================================================================
    [HIGHLIGHT THAY ĐỔI]: 
-   - Biến lưu URL cố định để tải file .bin. 
-   - YÊU CẦU: Thay thế <USERNAME> và <REPO_NAME> thành đúng thông tin GitHub của bạn.
+   - Đường dẫn cố định kéo file binary từ GitHub Release mới nhất.
 ========================================================================= */
 String FIRMWARE_URL = "https://github.com/trainsr-hub/VGF035/releases/download/latest/VGF035.ino.bin";
 /* ========================================================================= */
@@ -128,12 +127,12 @@ void driveMotor(int pwmLeft, int pwmRight) {
 
 /* =========================================================================
    [HIGHLIGHT THAY ĐỔI]: 
-   - Thêm hàm performOTAUpdate() thực hiện kéo HTTPS độc lập. 
-   - Đã xử lý ngắt tiến trình nguy hiểm (WDT, motor) trước khi update.
+   - Hàm xử lý Cloud OTA kéo trực tiếp từ GitHub Release.
+   - Khi chạy sẽ dựng cờ isOTAUpdating = true để vô hiệu hóa Local OTA và Motor/WDT.
 ========================================================================= */
-void performOTAUpdate() {
+void performGithubOTAUpdate() {
     if (WiFi.status() != WL_CONNECTED) {
-        if (tuningClient) tuningClient.println(">> [OTA FAILED] Chưa kết nối WiFi, không thể OTA.");
+        if (tuningClient) tuningClient.println(">> [GITHUB OTA FAILED] Chưa kết nối WiFi.");
         return;
     }
 
@@ -141,34 +140,32 @@ void performOTAUpdate() {
     esp_task_wdt_delete(NULL); 
     brakeMotor(); 
     
-    if (tuningClient) tuningClient.println(">> [OTA HTTPS] ĐANG KẾT NỐI TỚI GITHUB...");
-    Serial.println(">> [OTA HTTPS] Bắt đầu quá trình tải Firmware từ GitHub...");
+    if (tuningClient) tuningClient.println(">> [GITHUB OTA] BẮT ĐẦU TẢI FIRMWARE TỪ GITHUB...");
+    Serial.println(">> [GITHUB OTA] Bắt đầu quá trình tải Firmware từ GitHub...");
 
     WiFiClientSecure client;
-    client.setInsecure(); // Bỏ qua kiểm tra chứng chỉ bảo mật của GitHub để chống lỗi hết hạn Root CA.
-    
-    // Yêu cầu HTTPUpdate phải follow redirect, do link tải Release của Github sẽ chuyển hướng sang AWS S3.
+    client.setInsecure(); 
     httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     
     t_httpUpdate_return ret = httpUpdate.update(client, FIRMWARE_URL);
     
     switch (ret) {
         case HTTP_UPDATE_FAILED:
-            if (tuningClient) tuningClient.printf(">> [OTA LỖI]: Cập nhật thất bại (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+            if (tuningClient) tuningClient.printf(">> [GITHUB OTA LỖI]: Cập nhật thất bại (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
             Serial.printf("HTTP_UPDATE_FAILED Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
             isOTAUpdating = false;
             break;
             
         case HTTP_UPDATE_NO_UPDATES:
-            if (tuningClient) tuningClient.println(">> [OTA]: Không có bản cập nhật nào mới.");
+            if (tuningClient) tuningClient.println(">> [GITHUB OTA]: Không có bản cập nhật nào mới.");
             Serial.println("HTTP_UPDATE_NO_UPDATES");
             isOTAUpdating = false;
             break;
             
         case HTTP_UPDATE_OK:
-            if (tuningClient) tuningClient.println(">> [OTA THÀNH CÔNG]: Sẽ tự động khởi động lại sau 1 giây...");
+            if (tuningClient) tuningClient.println(">> [GITHUB OTA THÀNH CÔNG]: Khởi động lại sau 1 giây...");
             Serial.println("HTTP_UPDATE_OK");
-            delay(1000); // Đợi để gửi xong bản tin qua client
+            delay(1000);
             ESP.restart();
             break;
     }
@@ -207,10 +204,28 @@ void initTuningMode() {
     DRIVE_MAX_PWM = preferences.getInt("max_pwm", 200);
     BASE_PWM = preferences.getInt("base_pwm", 100);
 
-    /* =========================================================================
-       [HIGHLIGHT THAY ĐỔI]: 
-       - Đã xoá toàn bộ cài đặt ArduinoOTA cục bộ tại block này.
-    ========================================================================= */
+/* =========================================================================
+   [HIGHLIGHT THAY ĐỔI]: 
+   - Khởi tạo ArduinoOTA phục vụ nạp local trực tiếp từ Arduino IDE / CLI qua WiFi LAN.
+========================================================================= */
+    ArduinoOTA.setHostname("VARIS_AGV_WIFI");
+    ArduinoOTA.setPassword("2222");
+
+    ArduinoOTA.onStart([]() {
+        isOTAUpdating = true; 
+        esp_task_wdt_delete(NULL); 
+        brakeMotor(); 
+        Serial.println("\n>> [LOCAL OTA] BẮT ĐẦU NẠP CODE QUA WIFI LAN...");
+    });
+    ArduinoOTA.onEnd([]() { Serial.println("\n>> [LOCAL OTA] NẠP HOÀN TẤT! ĐANG KHỞI ĐỘNG LẠI..."); });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) { Serial.printf(">> [LOCAL OTA] Tiến độ: %u%%\r", (progress / (total / 100))); });
+    ArduinoOTA.onError([](ota_error_t error) {
+        isOTAUpdating = false; 
+        Serial.printf("\n>> [LOCAL OTA] LỖI [%u]\n", error);
+    });
+
+    ArduinoOTA.begin();
+/* ========================================================================= */
     tuningServer.begin();
 }
 
@@ -263,20 +278,19 @@ void processTuningCommands() {
         else if (cmd == "OTA0") { OTA_ON = false; preferences.putBool("OTA_ON", false); tuningClient.println(">> ĐÃ TẮT CỜ CHO PHÉP OTA"); }
         else if (cmd == "OTA1") { OTA_ON = true; preferences.putBool("OTA_ON", true); tuningClient.println(">> ĐÃ BẬT CỜ CHO PHÉP OTA"); }
         
-        /* =========================================================================
-           [HIGHLIGHT THAY ĐỔI]: 
-           - Bổ sung luồng xử lý lệnh "OTA UPDATE". 
-           - Yêu cầu cờ OTA_ON phải đang bật thì mới thực thi.
-        ========================================================================= */
+/* =========================================================================
+   [HIGHLIGHT THAY ĐỔI]: 
+   - Lệnh "OTA UPDATE" được dành riêng để kích hoạt GitHub Cloud OTA.
+========================================================================= */
         else if (cmd == "OTA UPDATE") {
             if (OTA_ON) {
-                tuningClient.println(">> [COMMAND] ĐÃ NHẬN LỆNH OTA UPDATE. CHUẨN BỊ KÉO FIRMWARE MỚI...");
-                performOTAUpdate();
+                tuningClient.println(">> [COMMAND] ĐÃ NHẬN LỆNH GITHUB OTA UPDATE. CHUẨN BỊ KÉO FIRMWARE MỚI...");
+                performGithubOTAUpdate();
             } else {
                 tuningClient.println(">> [CẢNH BÁO] TÍNH NĂNG OTA ĐANG BỊ KHÓA, GỬI LỆNH 'OTA1' ĐỂ MỞ KHÓA.");
             }
         }
-        /* ========================================================================= */
+/* ========================================================================= */
 
         else if (cmd.startsWith("MAX")) { 
             DRIVE_MAX_PWM = cmd.substring(3).toInt(); 
@@ -442,10 +456,14 @@ void setup() {
 void loop() {
     esp_task_wdt_reset();
 
-    /* =========================================================================
-       [HIGHLIGHT THAY ĐỔI]: 
-       - Loại bỏ dòng ArduinoOTA.handle() khỏi loop. HTTPUpdate không cần liên tục lắng nghe.
-    ========================================================================= */
+/* =========================================================================
+   [HIGHLIGHT THAY ĐỔI]: 
+   - Lắng nghe nạp Local OTA liên tục trong loop() khi OTA_ON = true và không có tiến trình OTA nào đang chạy.
+========================================================================= */
+    if (OTA_ON && !isOTAUpdating) { 
+        ArduinoOTA.handle(); 
+    }
+/* ========================================================================= */
 
     if (!isOTAUpdating) {
         
